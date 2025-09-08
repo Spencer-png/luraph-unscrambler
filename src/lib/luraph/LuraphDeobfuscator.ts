@@ -67,6 +67,10 @@ export class LuraphDeobfuscator {
         throw new Error('Input does not appear to be a valid Luraph obfuscated script');
       }
 
+      // Detect Luraph version
+      const detectedVersion = this.vm.detectLuraphVersion(ast);
+      this.reportProgress(step, totalSteps, 'Detecting VM handlers...', `Detected Luraph version ${detectedVersion}`);
+
       // Step 4: VM Analysis
       this.reportProgress(++step, totalSteps, 'Finding encryption information...', 'Extracting VM context');
       const context = this.vm.analyzeAST(ast);
@@ -119,71 +123,11 @@ export class LuraphDeobfuscator {
   }
 
   private async extractBytecode(context: DeobfuscationContext): Promise<VMProto> {
-    const proto: VMProto = {
-      instructions: [],
-      constants: context.decryptedConstants,
-      upvalues: [],
-      protos: [],
-      source: '@deobfuscated.lua',
-      lineDefined: 0,
-      lastLineDefined: 0,
-      numParams: 0,
-      isVararg: false,
-      maxStackSize: 0
-    };
-
-    // Convert VM handlers to Lua instructions
-    const handlerArray = Array.from(context.vmContext.handlers.values())
-      .sort((a, b) => a.index - b.index);
-
-    for (const handler of handlerArray) {
-      const instruction: VMInstruction = {
-        opcode: handler.opcode,
-        a: 0,
-        b: 0,
-        c: 0,
-        line: handler.index
-      };
-
-      // Extract operands from handler (simplified)
-      const operands = this.extractOperands(handler);
-      if (operands.length >= 1) instruction.a = operands[0];
-      if (operands.length >= 2) instruction.b = operands[1];
-      if (operands.length >= 3) instruction.c = operands[2];
-
-      proto.instructions.push(instruction);
-    }
-
-    // Calculate max stack size
-    proto.maxStackSize = this.calculateStackSize(proto.instructions);
-
-    return proto;
+    // Use the VM's bytecode reconstruction method
+    return this.vm.reconstructBytecode();
   }
 
-  private extractOperands(handler: any): number[] {
-    // Extract operands from the handler code
-    // This is a simplified version - real implementation would parse the handler AST
-    const operands: number[] = [];
-    
-    const code = handler.decrypted || handler.handler;
-    const registerMatches = code.match(/R\[(\d+)\]/g);
-    
-    if (registerMatches) {
-      for (const match of registerMatches.slice(0, 3)) {
-        const num = match.match(/\d+/);
-        if (num) {
-          operands.push(parseInt(num[0]));
-        }
-      }
-    }
-
-    // Fill with defaults if not enough operands
-    while (operands.length < 3) {
-      operands.push(0);
-    }
-
-    return operands;
-  }
+  // Removed extractOperands - now handled by BytecodeReconstructor
 
   private optimizeBytecode(proto: VMProto): void {
     // Remove redundant instructions
@@ -358,6 +302,30 @@ export class LuraphDeobfuscator {
     }
   }
 
+  // Enhanced deobfuscation with detailed progress reporting
+  public async deobfuscateWithDetails(luraphScript: string): Promise<{
+    result: DeobfuscationResult;
+    details: {
+      version: string;
+      handlersFound: number;
+      constantsDecrypted: number;
+      encryptionMethod: string;
+      reconstructionStats: any;
+    };
+  }> {
+    const result = await this.deobfuscate(luraphScript);
+    
+    const details = {
+      version: this.vm.detectLuraphVersion(this.parser.parse()),
+      handlersFound: this.vm.getHandlers().size,
+      constantsDecrypted: this.vm.getConstants().length,
+      encryptionMethod: this.vm.getEncryptionKey() ? 'detected' : 'unknown',
+      reconstructionStats: result.statistics
+    };
+
+    return { result, details };
+  }
+
   // Static method for quick deobfuscation
   public static async deobfuscateScript(
     script: string, 
@@ -365,5 +333,23 @@ export class LuraphDeobfuscator {
   ): Promise<DeobfuscationResult> {
     const deobfuscator = new LuraphDeobfuscator(onProgress);
     return await deobfuscator.deobfuscate(script);
+  }
+
+  // Static method for detailed deobfuscation
+  public static async deobfuscateScriptWithDetails(
+    script: string,
+    onProgress?: (progress: DeobfuscationProgress) => void
+  ): Promise<{
+    result: DeobfuscationResult;
+    details: {
+      version: string;
+      handlersFound: number;
+      constantsDecrypted: number;
+      encryptionMethod: string;
+      reconstructionStats: any;
+    };
+  }> {
+    const deobfuscator = new LuraphDeobfuscator(onProgress);
+    return await deobfuscator.deobfuscateWithDetails(script);
   }
 }
