@@ -15,16 +15,7 @@ const LuraphDeobfuscator = () => {
   const [currentStep, setCurrentStep] = useState('');
   const { toast } = useToast();
 
-  const deobfuscationSteps = [
-    'Parsing Lua file...',
-    'Building abstract syntax tree...',
-    'Detecting VM handlers...',
-    'Finding encryption information...',
-    'Decrypting bytecode...',
-    'Removing antidecompiler tricks...',
-    'Optimizing bytecode...',
-    'Generating output file...'
-  ];
+  // Real progress steps are now handled by the deobfuscator
 
   const handleFileContent = (content: string, name: string) => {
     setInputCode(content);
@@ -53,14 +44,15 @@ const LuraphDeobfuscator = () => {
     setOutputCode('');
 
     try {
-      // Simulate progress through deobfuscation steps
-      for (let i = 0; i < deobfuscationSteps.length; i++) {
-        setCurrentStep(deobfuscationSteps[i]);
-        setProgress((i / deobfuscationSteps.length) * 100);
-        await new Promise(resolve => setTimeout(resolve, 300 + Math.random() * 700));
-      }
-
-      const result = await deobfuscateLuaScript(inputCode);
+      // Use the real deobfuscation function with progress callback
+      const result = await deobfuscateLuaScript(inputCode, (progress) => {
+        setCurrentStep(progress.step);
+        setProgress(progress.progress);
+        if (progress.details) {
+          console.log(`Progress: ${progress.step} - ${progress.details}`);
+        }
+      });
+      
       setOutputCode(result);
       setProgress(100);
       setCurrentStep('Deobfuscation completed successfully!');
@@ -70,9 +62,10 @@ const LuraphDeobfuscator = () => {
         description: "Your Lua script has been successfully deobfuscated.",
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An error occurred while processing your script.';
       toast({
         title: "Deobfuscation failed",
-        description: "An error occurred while processing your script.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
