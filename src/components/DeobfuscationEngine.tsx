@@ -2,11 +2,17 @@ import React from 'react';
 import { LuraphDeobfuscator, DeobfuscationProgress } from '@/lib/luraph/LuraphDeobfuscator';
 
 // Real deobfuscation function using the LuraphDeobfuscator
-export const deobfuscateLuaScript = async (script: string): Promise<string> => {
+export const deobfuscateLuaScript = async (
+  script: string, 
+  onProgress?: (progress: DeobfuscationProgress) => void
+): Promise<string> => {
   return new Promise((resolve, reject) => {
     const deobfuscator = new LuraphDeobfuscator((progress: DeobfuscationProgress) => {
       // Progress callback for UI updates
       console.log(`Deobfuscation progress: ${progress.step} (${progress.progress.toFixed(1)}%)`);
+      if (onProgress) {
+        onProgress(progress);
+      }
     });
 
     deobfuscator.deobfuscate(script)
