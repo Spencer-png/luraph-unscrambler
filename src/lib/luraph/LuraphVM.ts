@@ -59,16 +59,23 @@ export class LuraphVM {
   private extractVMHandlers(node: ASTNode): void {
     if (node.type === 'FunctionDeclaration') {
       const func = node as FunctionDeclarationNode;
-      if (func.isVMHandler && func.handlerIndex !== undefined) {
+      
+      // More aggressive VM handler detection
+      const isVMHandler = func.isVMHandler || 
+                         this.detectVMHandlerPattern(func) ||
+                         this.hasVMOperations(func.body);
+      
+      if (isVMHandler) {
+        const handlerIndex = func.handlerIndex || this.extractHandlerIndexFromName(func.name.name);
         const handler: LuraphVMHandler = {
-          index: func.handlerIndex,
+          index: handlerIndex,
           opcode: this.guessOpcodeFromHandler(func),
           handler: this.extractHandlerCode(func),
           encrypted: this.isHandlerEncrypted(func)
         };
 
-        this.handlers.set(func.handlerIndex, handler);
-        this.vmContext.handlers.set(func.handlerIndex, handler);
+        this.handlers.set(handlerIndex, handler);
+        this.vmContext.handlers.set(handlerIndex, handler);
       }
     }
 
@@ -81,6 +88,37 @@ export class LuraphVM {
     if (node.type === 'BlockStatement' && 'statements' in node) {
       (node as any).statements.forEach((stmt: ASTNode) => this.extractVMHandlers(stmt));
     }
+  }
+
+  private detectVMHandlerPattern(func: FunctionDeclarationNode): boolean {
+    const name = func.name.name.toLowerCase();
+    
+    // Check for VM handler naming patterns
+    const vmPatterns = [
+      /handler_\d+/,
+      /vm_\w+/,
+      /op_\w+/,
+      /exec_\w+/,
+      /[a-zA-Z_][a-zA-Z0-9_]{15,}/, // Very long names
+      /^[a-zA-Z_][a-zA-Z0-9_]{8,}$/ // Medium-long names
+    ];
+    
+    return vmPatterns.some(pattern => pattern.test(name));
+  }
+
+  private extractHandlerIndexFromName(name: string): number {
+    // Try to extract index from function name
+    const match = name.match(/(\d+)/);
+    if (match) {
+      return parseInt(match[1]);
+    }
+    
+    // Use hash of name as index if no number found
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = ((hash << 5) - hash + name.charCodeAt(i)) & 0xffffffff;
+    }
+    return Math.abs(hash) % 1000;
   }
 
   private findEncryptionInfo(node: ASTNode): void {
