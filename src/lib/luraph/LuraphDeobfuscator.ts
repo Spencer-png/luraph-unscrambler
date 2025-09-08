@@ -185,6 +185,23 @@ export class LuraphDeobfuscator {
 
   // Create basic deobfuscated output for non-Luraph scripts
   private createBasicDeobfuscatedOutput(script: string): string {
+    // Try to extract actual Lua code from the obfuscated script
+    const extractedCode = this.extractLuaFromObfuscated(script);
+    
+    if (extractedCode.length > 0) {
+      return `-- Deobfuscated Lua Script
+-- Extracted from obfuscated code using pattern analysis
+
+${extractedCode}
+
+-- Analysis Notes:
+-- Original size: ${script.length} characters
+-- Obfuscation patterns detected: ${this.detectObfuscationPatterns(script)}
+-- Extraction method: Pattern-based analysis
+`;
+    }
+
+    // Fallback to basic analysis if no code could be extracted
     return `-- Basic Deobfuscated Output
 -- Original script was not detected as Luraph-obfuscated
 -- This is a simplified representation
@@ -210,6 +227,72 @@ deobfuscated_main()
 -- Note: This is a basic deobfuscation. For complete analysis,
 -- manual inspection or specialized tools may be required.
 `;
+  }
+
+  private extractLuaFromObfuscated(script: string): string {
+    const lines: string[] = [];
+    const scriptLines = script.split('\n');
+    
+    for (const line of scriptLines) {
+      const trimmed = line.trim();
+      
+      // Look for actual Lua code patterns
+      if (this.isLuaCode(trimmed)) {
+        // Clean up the line
+        const cleaned = this.cleanLuaLine(trimmed);
+        if (cleaned.length > 0) {
+          lines.push(cleaned);
+        }
+      }
+    }
+    
+    return lines.join('\n');
+  }
+
+  private isLuaCode(line: string): boolean {
+    // Check if line contains actual Lua code patterns
+    const luaPatterns = [
+      /^local\s+\w+\s*=/,           // Local variable assignment
+      /^function\s+\w+/,            // Function declaration
+      /^if\s+/,                     // If statement
+      /^for\s+/,                    // For loop
+      /^while\s+/,                  // While loop
+      /^return\s+/,                 // Return statement
+      /^print\s*\(/,                // Print statement
+      /^\w+\s*\(/,                  // Function call
+      /^\w+\s*=/,                   // Variable assignment
+      /^end\s*$/,                   // End statement
+      /^else\s*$/,                  // Else statement
+      /^elseif\s+/,                 // Elseif statement
+      /^do\s*$/,                    // Do statement
+      /^then\s*$/,                  // Then statement
+      /^until\s+/,                  // Until statement
+      /^repeat\s*$/,                // Repeat statement
+      /^break\s*$/,                 // Break statement
+    ];
+    
+    return luaPatterns.some(pattern => pattern.test(line));
+  }
+
+  private cleanLuaLine(line: string): string {
+    // Remove obfuscation artifacts while preserving actual code
+    let cleaned = line;
+    
+    // Remove excessive whitespace
+    cleaned = cleaned.replace(/\s+/g, ' ');
+    
+    // Remove obfuscated variable names (very long names)
+    cleaned = cleaned.replace(/\b[a-zA-Z_][a-zA-Z0-9_]{20,}\b/g, (match) => {
+      return `var_${match.length}`;
+    });
+    
+    // Clean up hex values
+    cleaned = cleaned.replace(/0x[0-9a-fA-F]+/g, (match) => {
+      const value = parseInt(match, 16);
+      return value.toString();
+    });
+    
+    return cleaned.trim();
   }
 
   private detectObfuscationPatterns(script: string): string {
