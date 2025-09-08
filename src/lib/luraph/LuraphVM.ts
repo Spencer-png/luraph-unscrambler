@@ -321,14 +321,40 @@ export class LuraphVM {
 
   private astToString(node: ASTNode): string {
     // Convert AST to string for pattern matching
-    // This is a simplified implementation
-    if (node.type === 'Literal') {
-      return (node as any).value?.toString() || '';
-    }
-    if (node.type === 'Identifier') {
-      return (node as any).name || '';
-    }
-    return '';
+    let result = '';
+    
+    const traverse = (n: ASTNode): void => {
+      if (n.type === 'Literal') {
+        result += (n as any).value?.toString() || '';
+      } else if (n.type === 'Identifier') {
+        result += (n as any).name || '';
+      } else if (n.type === 'FunctionDeclaration') {
+        const func = n as any;
+        result += `function ${func.name?.name || ''}`;
+      } else if (n.type === 'AssignmentExpression') {
+        const assignment = n as any;
+        result += 'assignment';
+      } else if (n.type === 'CallExpression') {
+        const call = n as any;
+        result += `call ${call.callee?.name || ''}`;
+      } else if (n.type === 'BinaryExpression') {
+        const binary = n as any;
+        result += `binary ${binary.operator || ''}`;
+      } else if (n.type === 'BlockStatement') {
+        const block = n as any;
+        if (block.statements) {
+          block.statements.forEach(traverse);
+        }
+      }
+      
+      // Recursively traverse children
+      if (n.children) {
+        n.children.forEach(traverse);
+      }
+    };
+    
+    traverse(node);
+    return result;
   }
 
   private isRegisterAccess(node: ASTNode): boolean {
@@ -382,22 +408,61 @@ export class LuraphVM {
   }
 
   public isValidLuraphScript(ast: ProgramNode): boolean {
-    // Check if the AST contains Luraph-specific patterns
-    let hasVMHandlers = false;
-    let hasEncryptedContent = false;
-    let hasObfuscatedNames = false;
+    // Convert AST to string for pattern matching
+    const codeString = this.astToString(ast);
+    
+    // Check for Luraph-specific patterns in the code
+    const luraphPatterns = [
+      /luraph/i,                    // Luraph mentions
+      /protected using Luraph/i,    // Protection notice
+      /lura\.ph/i,                  // Luraph website
+      /obfuscator/i,                // Obfuscator mentions
+      /0x[0-9a-fA-F]+/g,           // Hex values (common in obfuscated code)
+      /local\s+[a-zA-Z_][a-zA-Z0-9_]{20,}/, // Very long variable names
+      /function\s+[a-zA-Z_][a-zA-Z0-9_]{15,}/, // Long function names
+      /R\[.*?\]/g,                 // Register access patterns
+      /K\[.*?\]/g,                 // Constant access patterns
+      /handler_\d+/i,              // Handler function patterns
+      /vm_\w+/i,                   // VM function patterns
+      /encrypted/i,                // Encryption mentions
+      /decrypt/i,                  // Decryption mentions
+    ];
+
+    let patternMatches = 0;
+    for (const pattern of luraphPatterns) {
+      if (pattern.test(codeString)) {
+        patternMatches++;
+      }
+    }
+
+    // Also check AST structure for obfuscation indicators
+    let hasObfuscatedStructure = false;
+    let hasComplexExpressions = false;
+    let hasLongIdentifiers = false;
 
     const checkNode = (node: ASTNode): void => {
-      if (node.type === 'FunctionDeclaration' && (node as any).isVMHandler) {
-        hasVMHandlers = true;
-      }
-      if (node.type === 'EncryptedString') {
-        hasEncryptedContent = true;
-      }
-      if (node.type === 'Identifier' && (node as any).isObfuscated) {
-        hasObfuscatedNames = true;
+      // Check for obfuscated identifiers
+      if (node.type === 'Identifier') {
+        const identifier = node as any;
+        if (identifier.name && identifier.name.length > 15) {
+          hasLongIdentifiers = true;
+        }
       }
 
+      // Check for complex expressions (common in obfuscated code)
+      if (node.type === 'BinaryExpression') {
+        hasComplexExpressions = true;
+      }
+
+      // Check for obfuscated structure
+      if (node.type === 'FunctionDeclaration') {
+        const func = node as any;
+        if (func.name && func.name.name && func.name.name.length > 10) {
+          hasObfuscatedStructure = true;
+        }
+      }
+
+      // Recursively check children
       if (node.children) {
         node.children.forEach(checkNode);
       }
@@ -408,8 +473,11 @@ export class LuraphVM {
 
     checkNode(ast);
 
-    // Require at least 2 of 3 indicators for positive identification
-    const indicators = [hasVMHandlers, hasEncryptedContent, hasObfuscatedNames];
-    return indicators.filter(Boolean).length >= 2;
+    // More lenient detection - if we find any Luraph patterns or obfuscation indicators
+    const hasLuraphPatterns = patternMatches >= 2;
+    const hasObfuscationIndicators = hasObfuscatedStructure || hasComplexExpressions || hasLongIdentifiers;
+    
+    // Accept if we have Luraph patterns OR obfuscation indicators
+    return hasLuraphPatterns || hasObfuscationIndicators;
   }
 }
