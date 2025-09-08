@@ -14,11 +14,31 @@ export const deobfuscateLuaScript = async (script: string): Promise<string> => {
         if (result.success && result.deobfuscatedCode) {
           resolve(result.deobfuscatedCode);
         } else {
-          reject(new Error(result.error || 'Deobfuscation failed'));
+          // Provide more specific error messages
+          let errorMessage = result.error || 'Deobfuscation failed';
+          
+          if (errorMessage.includes('not appear to be a valid Luraph')) {
+            errorMessage = 'This file does not appear to be obfuscated with Luraph. Please ensure you are uploading a Luraph-obfuscated Lua script.';
+          } else if (errorMessage.includes('No VM handlers found')) {
+            errorMessage = 'No VM handlers detected. This script may use an unsupported Luraph version or obfuscation method.';
+          } else if (errorMessage.includes('validation failed')) {
+            errorMessage = 'The script is too heavily obfuscated or uses unsupported obfuscation techniques.';
+          }
+          
+          reject(new Error(errorMessage));
         }
       })
       .catch(error => {
-        reject(error);
+        // Provide user-friendly error messages
+        let errorMessage = error.message || 'An unexpected error occurred';
+        
+        if (errorMessage.includes('Failed to tokenize')) {
+          errorMessage = 'Invalid Lua syntax detected. Please ensure the file is a valid Lua script.';
+        } else if (errorMessage.includes('Parse error')) {
+          errorMessage = 'Failed to parse the Lua code. The file may be corrupted or not a valid Lua script.';
+        }
+        
+        reject(new Error(errorMessage));
       });
   });
 };
