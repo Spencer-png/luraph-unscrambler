@@ -94,6 +94,13 @@ export class LuraphDeobfuscator {
       this.reportProgress(++step, totalSteps, 'Finding encryption information...', 'Extracting VM context');
       const context = this.vm.analyzeAST(ast);
       
+      // Debug: Log what we found
+      console.log('VM Analysis Results:', {
+        handlersFound: context.vmContext.handlers.size,
+        constantsFound: context.decryptedConstants.length,
+        vmVersion: context.vmContext.vmVersion
+      });
+      
       const handlersFound = context.vmContext.handlers.size;
       if (handlersFound === 0) {
         // Try fallback analysis for simpler obfuscation patterns
