@@ -1,17 +1,33 @@
 import { ProgramNode, ASTNode, VMHandlerNode, EncryptedStringNode, ConstantTableNode, FunctionDeclarationNode, CallExpressionNode } from './types/ASTNodes';
 import { LuraphVMContext, LuraphVMHandler, VMConstant, VMProto, LuaOpcode, DeobfuscationContext } from './types/VMInstructions';
+import { LuraphDecryptor, EncryptionInfo } from './LuraphDecryptor';
+import { SymbolicExecutor } from './SymbolicExecutor';
+import { BytecodeReconstructor, ReconstructionContext } from './BytecodeReconstructor';
 
 export class LuraphVM {
   private vmContext: LuraphVMContext;
   private handlers: Map<number, LuraphVMHandler> = new Map();
   private constants: VMConstant[] = [];
   private encryptionKey: string = '';
+  private decryptor: LuraphDecryptor;
+  private symbolicExecutor: SymbolicExecutor;
+  private bytecodeReconstructor: BytecodeReconstructor;
+  private encryptionInfo: EncryptionInfo;
 
   constructor() {
     this.vmContext = {
       handlers: new Map(),
       constants: [],
       vmVersion: '11.8.1'
+    };
+    this.decryptor = new LuraphDecryptor();
+    this.symbolicExecutor = new SymbolicExecutor();
+    this.bytecodeReconstructor = new BytecodeReconstructor();
+    this.encryptionInfo = {
+      method: 'auto',
+      key: '',
+      algorithm: 'auto',
+      version: '11.8.1'
     };
   }
 
@@ -78,8 +94,17 @@ export class LuraphVM {
           if (this.isEncryptionKey(value.value)) {
             this.encryptionKey = value.value;
             this.vmContext.encryptionKey = value.value;
+            this.encryptionInfo.key = value.value;
           }
         }
+      }
+    }
+
+    // Look for encrypted string patterns
+    if (node.type === 'EncryptedString') {
+      const encryptedNode = node as EncryptedStringNode;
+      if (encryptedNode.encryptionMethod) {
+        this.encryptionInfo.method = encryptedNode.encryptionMethod;
       }
     }
 
@@ -106,10 +131,11 @@ export class LuraphVM {
               index
             });
           } else if (field.value.type === 'EncryptedString') {
-            const decrypted = this.decryptString(field.value.encryptedValue);
+            const encryptedNode = field.value as EncryptedStringNode;
+            const decryptionResult = this.decryptor.decryptString(encryptedNode.encryptedValue, this.encryptionInfo);
             this.constants.push({
               type: 'string',
-              value: decrypted,
+              value: decryptionResult.success ? decryptionResult.decrypted : encryptedNode.encryptedValue,
               index
             });
           }
@@ -128,15 +154,19 @@ export class LuraphVM {
   }
 
   private mapVMOperations(): void {
-    // Map detected VM handlers to Lua opcodes
+    // Map detected VM handlers to Lua opcodes using symbolic execution
     this.handlers.forEach((handler, index) => {
-      const mappedOpcode = this.mapHandlerToOpcode(handler);
-      handler.opcode = mappedOpcode;
-      
       // Decrypt handler if needed
       if (handler.encrypted) {
-        handler.decrypted = this.decryptHandler(handler.handler);
+        const decryptionResult = this.decryptor.decryptString(handler.handler, this.encryptionInfo);
+        if (decryptionResult.success) {
+          handler.decrypted = decryptionResult.decrypted;
+        }
       }
+      
+      // Use symbolic execution to determine the actual opcode
+      const analysisResult = this.symbolicExecutor.analyzeHandlerPattern(handler as any);
+      handler.opcode = analysisResult.likelyOpcode;
     });
   }
 
@@ -247,63 +277,58 @@ export class LuraphVM {
     }
   }
 
-  private decryptString(encrypted: string): string {
-    if (!this.encryptionKey) {
-      return encrypted; // Return as-is if no key found
-    }
+  // Method to reconstruct bytecode from VM handlers
+  public reconstructBytecode(): VMProto {
+    const reconstructionContext: ReconstructionContext = {
+      handlers: this.handlers,
+      constants: this.constants,
+      encryptionInfo: this.encryptionInfo,
+      vmVersion: this.vmContext.vmVersion,
+      instructionMapping: new Map()
+    };
 
-    // Implement actual decryption based on Luraph's methods
-    // This is a simplified version - real implementation would use the actual algorithm
-    try {
-      return this.xorDecrypt(encrypted, this.encryptionKey);
-    } catch (error) {
-      console.warn('Failed to decrypt string:', error);
-      return encrypted;
+    const result = this.bytecodeReconstructor.reconstructFromVM(reconstructionContext);
+    
+    if (result.success) {
+      return result.proto;
+    } else {
+      console.error('Bytecode reconstruction failed:', result.statistics.errors);
+      return this.createEmptyProto();
     }
   }
 
-  private xorDecrypt(encrypted: string, key: string): string {
-    // Simple XOR decryption - replace with actual Luraph algorithm
-    let result = '';
-    for (let i = 0; i < encrypted.length; i++) {
-      const charCode = encrypted.charCodeAt(i) ^ key.charCodeAt(i % key.length);
-      result += String.fromCharCode(charCode);
-    }
-    return result;
-  }
-
-  private mapHandlerToOpcode(handler: LuraphVMHandler): number {
-    // Use pattern matching to determine the actual Lua opcode
-    const patterns = [
-      { pattern: /R\[\w+\]\s*=\s*R\[\w+\]/, opcode: LuaOpcode.MOVE },
-      { pattern: /R\[\w+\]\s*=\s*K\[\w+\]/, opcode: LuaOpcode.LOADK },
-      { pattern: /R\[\w+\]\s*=\s*.*\+.*/, opcode: LuaOpcode.ADD },
-      { pattern: /R\[\w+\]\s*=\s*.*-.*/, opcode: LuaOpcode.SUB },
-      { pattern: /R\[\w+\]\s*=\s*.*\*.*/, opcode: LuaOpcode.MUL },
-      { pattern: /R\[\w+\]\s*=\s*.*\/.*/, opcode: LuaOpcode.DIV },
-      { pattern: /R\[\w+\]\(.*\)/, opcode: LuaOpcode.CALL },
-      { pattern: /return.*/, opcode: LuaOpcode.RETURN },
+  // Enhanced VM detection with better pattern matching
+  public detectLuraphVersion(ast: ProgramNode): string {
+    const versionPatterns = [
+      { pattern: /luraph.*11\.8\.1/i, version: '11.8.1' },
+      { pattern: /luraph.*11\.8/i, version: '11.8' },
+      { pattern: /luraph.*11\.7/i, version: '11.7' },
+      { pattern: /luraph.*11\.6/i, version: '11.6' },
+      { pattern: /luraph.*11\.5/i, version: '11.5' }
     ];
 
-    for (const { pattern, opcode } of patterns) {
-      if (pattern.test(handler.handler)) {
-        return opcode;
+    const codeString = this.astToString(ast);
+    
+    for (const { pattern, version } of versionPatterns) {
+      if (pattern.test(codeString)) {
+        return version;
       }
     }
 
-    return handler.opcode; // Keep existing if no pattern matches
+    // Default to latest supported version
+    return '11.8.1';
   }
 
-  private decryptHandler(handlerCode: string): string {
-    // Decrypt the handler code if it's encrypted
-    if (!this.encryptionKey) return handlerCode;
-    
-    try {
-      return this.xorDecrypt(handlerCode, this.encryptionKey);
-    } catch (error) {
-      console.warn('Failed to decrypt handler:', error);
-      return handlerCode;
+  private astToString(node: ASTNode): string {
+    // Convert AST to string for pattern matching
+    // This is a simplified implementation
+    if (node.type === 'Literal') {
+      return (node as any).value?.toString() || '';
     }
+    if (node.type === 'Identifier') {
+      return (node as any).name || '';
+    }
+    return '';
   }
 
   private isRegisterAccess(node: ASTNode): boolean {
