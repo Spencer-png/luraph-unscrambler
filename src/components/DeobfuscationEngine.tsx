@@ -1,35 +1,26 @@
 import React from 'react';
+import { LuraphDeobfuscator, DeobfuscationProgress } from '@/lib/luraph/LuraphDeobfuscator';
 
-// Mock deobfuscation function - in a real implementation this would call the Java backend
+// Real deobfuscation function using the LuraphDeobfuscator
 export const deobfuscateLuaScript = async (script: string): Promise<string> => {
-  // Simulate processing time
-  await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 3000));
-  
-  // Mock deobfuscation result
-  const mockDeobfuscated = `-- Deobfuscated Lua Script
--- Original script was obfuscated with Luraph
--- This is a simulated output for demonstration
+  return new Promise((resolve, reject) => {
+    const deobfuscator = new LuraphDeobfuscator((progress: DeobfuscationProgress) => {
+      // Progress callback for UI updates
+      console.log(`Deobfuscation progress: ${progress.step} (${progress.progress.toFixed(1)}%)`);
+    });
 
-local x = 0
-local name = "name: "
-
-for i = 0, 10 do
-    x = x + i
-end
-
-for i = 0, 10 do
-    name = name .. i .. ","
-end
-
-print(x)
-print(name)
-
--- Original obfuscated script contained:
--- ${script.length} characters of obfuscated code
--- Deobfuscation completed successfully
-`;
-
-  return mockDeobfuscated;
+    deobfuscator.deobfuscate(script)
+      .then(result => {
+        if (result.success && result.deobfuscatedCode) {
+          resolve(result.deobfuscatedCode);
+        } else {
+          reject(new Error(result.error || 'Deobfuscation failed'));
+        }
+      })
+      .catch(error => {
+        reject(error);
+      });
+  });
 };
 
 // Component for showing deobfuscation status and progress
